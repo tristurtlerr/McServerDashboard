@@ -5,6 +5,7 @@ const https = require('https');
 const { spawn, execSync } = require('child_process');
 const os = require('os');
 const pidusage = require('pidusage');
+const nbt = require('prismarine-nbt');
 
 let mainWindow = null;
 let serverProcess = null;
@@ -12,6 +13,16 @@ let serverStatus = 'stopped';
 let activeInstallDir = null;
 let players = [];
 let statsInterval = null;
+
+// Helper to parse NBT buffer cleanly
+function parseNbtBuffer(buffer) {
+  return new Promise((resolve, reject) => {
+    nbt.parse(buffer, (err, data) => {
+      if (err) return reject(err);
+      resolve(nbt.simplify(data.parsed || data));
+    });
+  });
+}
 
 // App configuration helper
 const configPath = path.join(app.getPath('userData'), 'config.json');
@@ -655,5 +666,331 @@ ipcMain.handle('remove-from-whitelist', async (event, { installDir, username }) 
   } catch (e) {
     console.error('Failed to write whitelist', e);
     return { success: false, error: e.message };
+  }
+});
+
+// Get world name helper
+function getLevelName(installDir) {
+  const propertiesPath = path.join(installDir, 'server.properties');
+  if (!fs.existsSync(propertiesPath)) return 'world';
+  try {
+    const content = fs.readFileSync(propertiesPath, 'utf-8');
+    const match = content.match(/^level-name\s*=\s*([^\r\n]+)/m);
+    return match ? match[1].trim() : 'world';
+  } catch (e) {
+    return 'world';
+  }
+}
+
+// Get all players (scans world/playerdata or world/players/data)
+ipcMain.handle('get-all-players', async (event, installDir) => {
+  try {
+    const levelName = getLevelName(installDir);
+    let playerdataDir = path.join(installDir, levelName, 'playerdata');
+    if (!fs.existsSync(playerdataDir)) {
+      playerdataDir = path.join(installDir, levelName, 'players', 'data');
+    }
+    const cachePath = path.join(installDir, 'usercache.json');
+
+    // Parse user cache
+    const usercacheMap = {};
+    const uuidMapByName = {};
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cacheContent = fs.readFileSync(cachePath, 'utf-8');
+        const cache = JSON.parse(cacheContent);
+        for (const entry of cache) {
+          if (entry.uuid && entry.name) {
+            usercacheMap[entry.uuid] = entry.name;
+            uuidMapByName[entry.name.toLowerCase()] = entry.uuid;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse usercache.json', e);
+      }
+    }
+
+    const playersList = [];
+    const addedUuids = new Set();
+
+    // 1. Scan playerdata files on disk
+    if (fs.existsSync(playerdataDir)) {
+      const files = fs.readdirSync(playerdataDir);
+      for (const filename of files) {
+        if (filename.endsWith('.dat')) {
+          const uuid = filename.slice(0, -4);
+          const name = usercacheMap[uuid] || uuid;
+          playersList.push({
+            uuid,
+            name,
+            online: players.includes(name)
+          });
+          addedUuids.add(uuid);
+        }
+      }
+    }
+
+    // 2. Merge online players who haven't saved to disk yet
+    for (const onlineName of players) {
+      const resolvedUuid = uuidMapByName[onlineName.toLowerCase()];
+      if (resolvedUuid && !addedUuids.has(resolvedUuid)) {
+        playersList.push({
+          uuid: resolvedUuid,
+          name: onlineName,
+          online: true
+        });
+        addedUuids.add(resolvedUuid);
+      } else if (!resolvedUuid) {
+        // Generate offline fallback UUID
+        const crypto = require('crypto');
+        const hash = crypto.createHash('md5').update(`OfflinePlayer:${onlineName}`).digest();
+        hash[6] = (hash[6] & 0x0f) | 0x30;
+        hash[8] = (hash[8] & 0x3f) | 0x80;
+        const hex = hash.toString('hex');
+        const fallbackUuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        
+        if (!addedUuids.has(fallbackUuid)) {
+          playersList.push({
+            uuid: fallbackUuid,
+            name: onlineName,
+            online: true
+          });
+          addedUuids.add(fallbackUuid);
+        }
+      }
+    }
+
+    return playersList;
+  } catch (e) {
+    console.error('Failed to get all players', e);
+    return [];
+  }
+});
+
+// Get detailed player profile (NBT data, stats, achievements, filtered logs)
+ipcMain.handle('get-player-profile', async (event, { installDir, uuid, username }) => {
+  try {
+    const levelName = getLevelName(installDir);
+    const worldDir = path.join(installDir, levelName);
+    
+    let datPath = path.join(worldDir, 'playerdata', `${uuid}.dat`);
+    if (!fs.existsSync(datPath)) {
+      datPath = path.join(worldDir, 'players', 'data', `${uuid}.dat`);
+    }
+
+    let statsPath = path.join(worldDir, 'stats', `${uuid}.json`);
+    if (!fs.existsSync(statsPath)) {
+      statsPath = path.join(worldDir, 'players', 'stats', `${uuid}.json`);
+    }
+
+    let advPath = path.join(worldDir, 'advancements', `${uuid}.json`);
+    if (!fs.existsSync(advPath)) {
+      advPath = path.join(worldDir, 'players', 'advancements', `${uuid}.json`);
+    }
+
+    const logPath = path.join(installDir, 'logs', 'latest.log');
+
+    const profile = {
+      nbt: null,
+      stats: null,
+      advancements: [],
+      logs: []
+    };
+
+    // 1. Read Player NBT Data
+    if (fs.existsSync(datPath)) {
+      try {
+        const buffer = fs.readFileSync(datPath);
+        const nbtData = await parseNbtBuffer(buffer);
+        const datStats = fs.statSync(datPath);
+
+        // Map dimensions
+        let dim = 'Overworld';
+        if (nbtData.Dimension === -1 || nbtData.Dimension === 'minecraft:the_nether') dim = 'Nether';
+        else if (nbtData.Dimension === 1 || nbtData.Dimension === 'minecraft:the_end') dim = 'End';
+
+        // Map inventory & ender chest items
+        const mapItems = (itemsList) => {
+          if (!itemsList || !Array.isArray(itemsList)) return [];
+          return itemsList.map(item => ({
+            id: item.id ? item.id.replace('minecraft:', '') : 'unknown',
+            count: item.Count || item.count || 1,
+            slot: item.Slot || 0
+          }));
+        };
+
+        // Gamemode labeling
+        const gamemodes = ['Survival', 'Creative', 'Adventure', 'Spectator'];
+        const gmMode = gamemodes[nbtData.playerGameType] || 'Survival';
+
+        profile.nbt = {
+          pos: nbtData.Pos ? nbtData.Pos.map(p => Math.round(p * 100) / 100) : [0, 0, 0],
+          rotation: nbtData.Rotation ? nbtData.Rotation.map(r => Math.round(r * 100) / 100) : [0, 0],
+          dimension: dim,
+          xpLevel: nbtData.XpLevel || 0,
+          xpProgress: Math.round((nbtData.XpP || 0) * 100),
+          health: Math.round(nbtData.Health || 20),
+          hunger: Math.round(nbtData.foodLevel || 20),
+          gamemode: gmMode,
+          effects: nbtData.ActiveEffects ? nbtData.ActiveEffects.map(e => ({
+            id: e.id ? e.id.replace('minecraft:', '') : `Effect ID: ${e.Id}`,
+            amplifier: e.Amplifier || 0,
+            duration: Math.round((e.Duration || 0) / 20) // in seconds
+          })) : [],
+          inventory: mapItems(nbtData.Inventory),
+          enderchest: mapItems(nbtData.EnderItems),
+          lastLogout: datStats.mtime.toISOString()
+        };
+      } catch (e) {
+        console.error('Failed to parse player NBT file', e);
+      }
+    }
+
+    // 2. Read Player Stats
+    if (fs.existsSync(statsPath)) {
+      try {
+        const statsContent = fs.readFileSync(statsPath, 'utf-8');
+        const statsObj = JSON.parse(statsContent);
+
+        // Helper to query numbers matching keys
+        const getStatValue = (regex) => {
+          let sum = 0;
+          const search = (obj) => {
+            if (!obj || typeof obj !== 'object') return;
+            for (const [k, v] of Object.entries(obj)) {
+              if (regex.test(k) && typeof v === 'number') {
+                sum += v;
+              } else if (typeof v === 'object') {
+                search(v);
+              }
+            }
+          };
+          search(statsObj);
+          return sum;
+        };
+
+        // Custom Mined block count summing
+        let mined = 0;
+        const searchMined = (obj) => {
+          if (!obj || typeof obj !== 'object') return;
+          for (const [k, v] of Object.entries(obj)) {
+            if ((k.includes('minecraft:mined') || k.includes('stat.mineBlock')) && typeof v === 'object') {
+              for (const count of Object.values(v)) {
+                if (typeof count === 'number') mined += count;
+              }
+            } else if (typeof v === 'number' && k.includes('stat.mineBlock')) {
+              mined += v;
+            } else if (typeof v === 'object') {
+              searchMined(v);
+            }
+          }
+        };
+        searchMined(statsObj);
+
+        // Diamonds mined block count summing
+        let diamonds = 0;
+        const searchDiamonds = (obj) => {
+          if (!obj || typeof obj !== 'object') return;
+          for (const [k, v] of Object.entries(obj)) {
+            if ((k.includes('diamond_ore') || k.includes('deepslate_diamond_ore') || k.includes('oreDiamond')) && typeof v === 'number') {
+              diamonds += v;
+            } else if (typeof v === 'object') {
+              searchDiamonds(v);
+            }
+          }
+        };
+        searchDiamonds(statsObj);
+
+        profile.stats = {
+          walkDistance: Math.round(getStatValue(/walk_one_cm|walkOneCm/) / 100), // convert to meters
+          flyDistance: Math.round(getStatValue(/fly_one_cm|flyOneCm|aviator_one_cm/) / 100),
+          swimDistance: Math.round(getStatValue(/swim_one_cm|swimOneCm/) / 100),
+          minedBlocks: mined,
+          kills: getStatValue(/mob_kills|mobKills|player_kills|playerKills/),
+          deaths: getStatValue(/deaths|deaths/),
+          chestsOpened: getStatValue(/open_chest|chestOpened/),
+          diamondsMined: diamonds
+        };
+      } catch (e) {
+        console.error('Failed to parse player stats file', e);
+      }
+    }
+
+    // 3. Read Player Advancements
+    if (fs.existsSync(advPath)) {
+      try {
+        const advContent = fs.readFileSync(advPath, 'utf-8');
+        const advObj = JSON.parse(advContent);
+        const achievementsList = [];
+
+        for (const [key, val] of Object.entries(advObj)) {
+          if (key !== 'DataVersion' && val && typeof val === 'object' && val.done) {
+            // Find earliest criteria achievement date
+            let earliestDate = null;
+            if (val.criteria && typeof val.criteria === 'object') {
+              for (const time of Object.values(val.criteria)) {
+                if (time) {
+                  const d = new Date(time);
+                  if (!earliestDate || d < earliestDate) {
+                    earliestDate = d;
+                  }
+                }
+              }
+            }
+
+            if (earliestDate) {
+              // Format key name e.g. "minecraft:story/mine_stone" -> "Mine Stone"
+              const parts = key.replace('minecraft:', '').split('/');
+              const lastPart = parts[parts.length - 1];
+              const cleanName = lastPart
+                .replace(/_/g, ' ')
+                .split(' ')
+                .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ');
+
+              achievementsList.push({
+                id: key,
+                name: cleanName,
+                time: earliestDate.toISOString()
+              });
+            }
+          }
+        }
+
+        // Sort chronologically
+        achievementsList.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+        profile.advancements = achievementsList;
+      } catch (e) {
+        console.error('Failed to parse player advancements file', e);
+      }
+    }
+
+    // 4. Scan Log History for Player Actions
+    if (fs.existsSync(logPath)) {
+      try {
+        const logContent = fs.readFileSync(logPath, 'utf-8');
+        const lines = logContent.split(/\r?\n/);
+        const filteredLines = [];
+        
+        // Match player name (case-insensitive)
+        const nameRegex = new RegExp(`\\b${username}\\b`, 'i');
+
+        for (const line of lines) {
+          if (nameRegex.test(line)) {
+            filteredLines.push(line);
+          }
+        }
+
+        // Return up to the last 200 occurrences
+        profile.logs = filteredLines.slice(-200);
+      } catch (e) {
+        console.error('Failed to parse server logs for player history', e);
+      }
+    }
+
+    return profile;
+  } catch (e) {
+    console.error('Failed to compile player profile', e);
+    return null;
   }
 });

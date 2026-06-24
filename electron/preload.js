@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   readWhitelist: (dir) => ipcRenderer.invoke('read-whitelist', dir),
   addToWhitelist: (dir, name) => ipcRenderer.invoke('add-to-whitelist', { installDir: dir, username: name }),
   removeFromWhitelist: (dir, name) => ipcRenderer.invoke('remove-from-whitelist', { installDir: dir, username: name }),
+  getAllPlayers: (dir) => ipcRenderer.invoke('get-all-players', dir),
+  getPlayerProfile: (dir, uuid, name) => ipcRenderer.invoke('get-player-profile', { installDir: dir, uuid, username: name }),
 
   // Event Listeners (with cleanups returned as functions)
   onDownloadProgress: (callback) => {

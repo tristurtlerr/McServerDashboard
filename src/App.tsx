@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import SetupWizard from './components/SetupWizard';
 import Dashboard from './components/Dashboard';
 import SettingsPage from './components/SettingsPage';
+import PlayerDirectory from './components/PlayerDirectory';
+import PlayerProfile from './components/PlayerProfile';
 import { HardDrive, RefreshCw } from 'lucide-react';
 
-type ViewState = 'loading' | 'wizard' | 'dashboard' | 'settings';
+type ViewState = 'loading' | 'wizard' | 'dashboard' | 'settings' | 'directory' | 'profile';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('loading');
@@ -14,6 +16,8 @@ export default function App() {
   const [hasJava, setHasJava] = useState(false);
   const [serverStatus, setServerStatus] = useState<'stopped' | 'starting' | 'running'>('stopped');
   const [players, setPlayers] = useState<string[]>([]);
+  const [selectedPlayerUuid, setSelectedPlayerUuid] = useState('');
+  const [selectedPlayerName, setSelectedPlayerName] = useState('');
 
   useEffect(() => {
     async function initializeApp() {
@@ -134,6 +138,7 @@ export default function App() {
             players={players}
             onOpenSettings={() => setView('settings')}
             onOpenWizard={() => setView('wizard')}
+            onOpenDirectory={() => setView('directory')}
           />
         )}
 
@@ -143,6 +148,28 @@ export default function App() {
             systemRam={systemRam}
             onSaveComplete={handleSaveSettingsComplete}
             onBack={() => setView('dashboard')}
+          />
+        )}
+
+        {view === 'directory' && (
+          <PlayerDirectory
+            installDir={installDir}
+            onSelectPlayer={(uuid, name) => {
+              setSelectedPlayerUuid(uuid);
+              setSelectedPlayerName(name);
+              setView('profile');
+            }}
+            onClose={() => setView('dashboard')}
+          />
+        )}
+
+        {view === 'profile' && (
+          <PlayerProfile
+            installDir={installDir}
+            uuid={selectedPlayerUuid}
+            username={selectedPlayerName}
+            onBack={() => setView('directory')}
+            isOnline={players.includes(selectedPlayerName)}
           />
         )}
       </main>

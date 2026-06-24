@@ -9,6 +9,7 @@ interface DashboardProps {
   players: string[];
   onOpenSettings: () => void;
   onOpenWizard: () => void;
+  onOpenDirectory: () => void;
 }
 
 export default function Dashboard({
@@ -17,7 +18,8 @@ export default function Dashboard({
   serverStatus,
   players,
   onOpenSettings,
-  onOpenWizard
+  onOpenWizard,
+  onOpenDirectory
 }: DashboardProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [command, setCommand] = useState('');
@@ -361,10 +363,14 @@ export default function Dashboard({
           
           {/* Players Card */}
           <div className="mcraft-panel p-4 flex flex-col shrink-0">
-            <h3 className="text-xs font-press-start font-bold text-green-500 border-b border-gray-800 pb-2 mb-3 flex items-center uppercase">
-              <Users className="h-4 w-4 mr-2" />
-              Players ({players.length})
-            </h3>
+            <button
+              onClick={onOpenDirectory}
+              className="mcraft-btn w-full py-2.5 mb-3 flex items-center justify-center text-xs tracking-wider shrink-0"
+              title="Open players database"
+            >
+              <Users className="h-4 w-4 mr-2 text-green-500" />
+              PLAYERS ({players.length})
+            </button>
             
             {players.length === 0 ? (
               <div className="py-6 text-center text-gray-500 text-xs italic font-mono bg-zinc-950/40 rounded border border-zinc-900">
