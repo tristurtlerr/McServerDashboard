@@ -8,7 +8,8 @@
     "dev:frontend": "vite",
     "dev:electron": "electron .",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "package": "npm run build && node package.js"
   },
   "dependencies": {
     "lucide-react": "^1.21.0",
@@ -26,8 +27,12 @@
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^10.0.3",
     "electron": "^42.5.0",
+    "electron-packager": "^17.1.2",
     "oxlint": "^1.69.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.0"
+  },
+  "overrides": {
+    "yauzl": "^3.4.0"
   }
 }
