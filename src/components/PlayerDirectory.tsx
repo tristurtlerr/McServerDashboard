@@ -8,12 +8,13 @@ interface Player {
 }
 
 interface PlayerDirectoryProps {
+  serverId: string;
   installDir: string;
   onSelectPlayer: (uuid: string, name: string) => void;
   onClose: () => void;
 }
 
-export default function PlayerDirectory({ installDir, onSelectPlayer, onClose }: PlayerDirectoryProps) {
+export default function PlayerDirectory({ serverId, installDir, onSelectPlayer, onClose }: PlayerDirectoryProps) {
   const [playersList, setPlayersList] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -22,7 +23,7 @@ export default function PlayerDirectory({ installDir, onSelectPlayer, onClose }:
   const fetchPlayers = async () => {
     try {
       setLoading(true);
-      const list = await window.api.getAllPlayers(installDir);
+      const list = await window.api.getAllPlayers(serverId, installDir);
       setPlayersList(list);
     } catch (e) {
       console.error('Failed to get historical players list', e);
@@ -33,7 +34,7 @@ export default function PlayerDirectory({ installDir, onSelectPlayer, onClose }:
 
   useEffect(() => {
     fetchPlayers();
-  }, [installDir]);
+  }, [installDir, serverId]);
 
   const filteredPlayers = playersList.filter(player => {
     const matchesSearch = player.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -45,7 +46,7 @@ export default function PlayerDirectory({ installDir, onSelectPlayer, onClose }:
   });
 
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
+    <div className="w-full max-w-5xl mx-auto space-y-6 flex flex-col flex-1 min-h-0">
       
       {/* Header */}
       <div className="flex justify-between items-center border-b border-gray-800 pb-3 shrink-0">

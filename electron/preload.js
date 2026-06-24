@@ -9,9 +9,12 @@ contextBridge.exposeInMainWorld('api', {
   checkServerInstalled: (dir) => ipcRenderer.invoke('check-server-installed', dir),
   getAppConfig: () => ipcRenderer.invoke('get-app-config'),
   saveAppConfig: (config) => ipcRenderer.invoke('save-app-config', config),
+  getServerStatuses: () => ipcRenderer.invoke('get-server-statuses'),
+  getServerPlayers: () => ipcRenderer.invoke('get-server-players'),
+  resizeWindow: (width, height) => ipcRenderer.invoke('resize-window', { width, height }),
   startServer: (params) => ipcRenderer.invoke('start-server', params),
-  stopServer: () => ipcRenderer.invoke('stop-server'),
-  sendServerCommand: (cmd) => ipcRenderer.invoke('send-server-command', cmd),
+  stopServer: (serverId) => ipcRenderer.invoke('stop-server', serverId),
+  sendServerCommand: (serverId, cmd) => ipcRenderer.invoke('send-server-command', { serverId, command: cmd }),
   checkEulaStatus: (dir) => ipcRenderer.invoke('check-eula-status', dir),
   acceptEula: (dir) => ipcRenderer.invoke('accept-eula', dir),
   readProperties: (dir) => ipcRenderer.invoke('read-properties', dir),
@@ -19,7 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   readWhitelist: (dir) => ipcRenderer.invoke('read-whitelist', dir),
   addToWhitelist: (dir, name) => ipcRenderer.invoke('add-to-whitelist', { installDir: dir, username: name }),
   removeFromWhitelist: (dir, name) => ipcRenderer.invoke('remove-from-whitelist', { installDir: dir, username: name }),
-  getAllPlayers: (dir) => ipcRenderer.invoke('get-all-players', dir),
+  getAllPlayers: (serverId, dir) => ipcRenderer.invoke('get-all-players', { serverId, installDir: dir }),
   getPlayerProfile: (dir, uuid, name) => ipcRenderer.invoke('get-player-profile', { installDir: dir, uuid, username: name }),
 
   // Event Listeners (with cleanups returned as functions)

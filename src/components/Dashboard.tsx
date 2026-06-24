@@ -3,6 +3,7 @@ import { Play, Square, RotateCcw, Settings, Terminal, Users, ChevronRight, HardD
 import EulaModal from './EulaModal';
 
 interface DashboardProps {
+  serverId: string;
   installDir: string;
   allocatedRam: number;
   serverStatus: 'stopped' | 'starting' | 'running';
@@ -13,6 +14,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({
+  serverId,
   installDir,
   allocatedRam,
   serverStatus,
@@ -40,16 +42,22 @@ export default function Dashboard({
     // Clear logs on mount
     setLogs([`[Dashboard]: Connected. Server directory: ${installDir}`]);
 
-    const unsubscribeLog = window.api.onServerLog((line) => {
-      setLogs((prev) => [...prev, line]);
+    const unsubscribeLog = window.api.onServerLog((data) => {
+      if (data.serverId === serverId) {
+        setLogs((prev) => [...prev, data.line]);
+      }
     });
 
-    const unsubscribeError = window.api.onServerError((err) => {
-      setLogs((prev) => [...prev, `[Dashboard Error]: ${err}`]);
+    const unsubscribeError = window.api.onServerError((data) => {
+      if (data.serverId === serverId) {
+        setLogs((prev) => [...prev, `[Dashboard Error]: ${data.error}`]);
+      }
     });
 
-    const unsubscribeStats = window.api.onServerStats((s) => {
-      setStats(s);
+    const unsubscribeStats = window.api.onServerStats((data) => {
+      if (data.serverId === serverId) {
+        setStats(data.stats);
+      }
     });
 
     return () => {
@@ -57,7 +65,7 @@ export default function Dashboard({
       unsubscribeError();
       unsubscribeStats();
     };
-  }, [installDir]);
+  }, [installDir, serverId]);
 
   // Auto-scroll logic
   useEffect(() => {
@@ -86,7 +94,7 @@ export default function Dashboard({
 
   const runServer = async () => {
     setLogs((prev) => [...prev, '[Dashboard]: Starting Minecraft server process...']);
-    const result = await window.api.startServer({ installDir, ramMB: allocatedRam });
+    const result = await window.api.startServer({ serverId, installDir, ramMB: allocatedRam });
     if (!result.success) {
       setLogs((prev) => [...prev, `[Dashboard Error]: Failed to start server: ${result.error}`]);
     }
@@ -97,7 +105,7 @@ export default function Dashboard({
     const { type, playerName } = confirmAction;
     
     // Execute kick/ban command in-game
-    await window.api.sendServerCommand(`${type} ${playerName}`);
+    await window.api.sendServerCommand(serverId, `${type} ${playerName}`);
     setLogs((prev) => [...prev, `[Dashboard]: Executing Command: /${type} ${playerName}`]);
     setConfirmAction(null);
   };
@@ -120,7 +128,7 @@ export default function Dashboard({
 
   const handleStop = async () => {
     setLogs((prev) => [...prev, '[Dashboard]: Sending stop command to server...']);
-    const result = await window.api.stopServer();
+    const result = await window.api.stopServer(serverId);
     if (!result.success) {
       setLogs((prev) => [...prev, `[Dashboard Error]: Failed to stop server: ${result.error}`]);
     }
@@ -128,22 +136,13 @@ export default function Dashboard({
 
   const handleRestart = async () => {
     setLogs((prev) => [...prev, '[Dashboard]: Restarting server...']);
-    await window.api.stopServer();
-    // Start server will be re-triggered when status becomes stopped,
-    // or we can wait and launch it. Since Electron stops the process and transitions
-    // back to stopped, we can wait or execute simple wait and start.
-    // Let's implement a simple sequence: stop, and once status is stopped, start.
-    // To make it easy, we trigger stop, and once the process exits (status is stopped), we start.
-    // The main process handles this or the frontend can poll. Let's do it in main process or simply
-    // call stop and start sequentially. Actually, stop-server resolves after sending command,
-    // so we should wait for status to hit 'stopped' before starting.
-    // Let's listen to status change to stopped and then start.
+    await window.api.stopServer(serverId);
     let started = false;
-    const unsub = window.api.onServerStatusChange((status) => {
-      if (status === 'stopped' && !started) {
+    const unsub = window.api.onServerStatusChange((data) => {
+      if (data.serverId === serverId && data.status === 'stopped' && !started) {
         started = true;
         unsub();
-        window.api.startServer({ installDir, ramMB: allocatedRam });
+        window.api.startServer({ serverId, installDir, ramMB: allocatedRam });
       }
     });
   };
@@ -161,7 +160,7 @@ export default function Dashboard({
     setCommandHistory(newHistory);
     setHistoryIndex(-1);
 
-    await window.api.sendServerCommand(cmd);
+    await window.api.sendServerCommand(serverId, cmd);
   };
 
   // Keyboard navigation for command history
@@ -225,7 +224,7 @@ export default function Dashboard({
   const status = getStatusDetails();
 
   return (
-    <div className="space-y-6 flex flex-col h-[calc(100vh-60px)]">
+    <div className="space-y-6 flex flex-col flex-1 min-h-0">
       
       {/* Top Controller Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-800 pb-4 shrink-0">

@@ -2,15 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { Save, RefreshCw, CheckCircle, Sliders, Shield, Network, UserPlus, Info, Users, Search, Trash2, ShieldCheck, Cpu, HardDrive } from 'lucide-react';
 
 interface SettingsPageProps {
+  serverId: string;
   installDir: string;
   systemRam: number;
   onSaveComplete: (newRam: number) => void;
   onBack: () => void;
+  onDeleteServer: (id: string) => void;
 }
 
 type TabType = 'basic' | 'advanced' | 'whitelist' | 'specs';
 
-export default function SettingsPage({ installDir, systemRam, onSaveComplete, onBack }: SettingsPageProps) {
+export default function SettingsPage({ serverId, installDir, systemRam, onSaveComplete, onBack, onDeleteServer }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<TabType>('basic');
   const [ramAllocation, setRamAllocation] = useState(2048);
   const [properties, setProperties] = useState<Record<string, string>>({});
@@ -23,13 +25,19 @@ export default function SettingsPage({ installDir, systemRam, onSaveComplete, on
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [whitelistMsg, setWhitelistMsg] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const loadSettingsAndWhitelist = async () => {
     try {
       setLoading(true);
       // Load app config for RAM
-      const config = await window.api.getAppConfig();
-      if (config.ramMB) setRamAllocation(config.ramMB);
+      const config = (await window.api.getAppConfig()) as any;
+      const serverEntry = config.servers?.find((s: any) => s.id === serverId);
+      if (serverEntry) {
+        setRamAllocation(serverEntry.ramMB);
+      } else if (config.ramMB) {
+        setRamAllocation(config.ramMB);
+      }
 
       // Load server properties
       const props = await window.api.readProperties(installDir);
@@ -65,7 +73,17 @@ export default function SettingsPage({ installDir, systemRam, onSaveComplete, on
 
     try {
       // 1. Save RAM to App Config
-      await window.api.saveAppConfig({ installDir, ramMB: ramAllocation });
+      const config = await window.api.getAppConfig();
+      const updatedServers = config.servers.map((s: any) => {
+        if (s.id === serverId) {
+          return { ...s, ramMB: ramAllocation };
+        }
+        return s;
+      });
+      await window.api.saveAppConfig({
+        ...config,
+        servers: updatedServers
+      });
 
       // 2. Save configurations to server.properties
       const saveResult = await window.api.writeProperties(installDir, properties);
@@ -153,7 +171,7 @@ export default function SettingsPage({ installDir, systemRam, onSaveComplete, on
   }).sort((a, b) => a[0].localeCompare(b[0]));
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
+    <div className="w-full max-w-4xl mx-auto space-y-6 flex flex-col flex-1 min-h-0">
       
       {/* Top Header */}
       <div className="flex justify-between items-center border-b border-gray-800 pb-3 shrink-0">
@@ -196,7 +214,8 @@ export default function SettingsPage({ installDir, systemRam, onSaveComplete, on
         
         {/* BASIC SETTINGS TAB */}
         {activeTab === 'basic' && (
-          <form onSubmit={handleSaveProperties} className="space-y-6">
+          <>
+            <form onSubmit={handleSaveProperties} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* RAM Allocation Card */}
@@ -396,7 +415,74 @@ export default function SettingsPage({ installDir, systemRam, onSaveComplete, on
               </button>
             </div>
           </form>
-        )}
+
+          {/* Danger Zone */}
+          <div className="mt-8 mcraft-panel p-5 border-red-900/60 bg-red-950/10 space-y-4">
+            <h3 className="text-xs font-bold font-press-start text-red-500 border-b border-red-950 pb-2 flex items-center uppercase">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Danger Zone
+            </h3>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-xs font-bold text-gray-200 block">Delete Server</span>
+                <p className="text-[10px] text-gray-500 font-sans max-w-lg leading-relaxed">
+                  This will remove the server from your manager list. The files in the installation directory on your disk will NOT be deleted.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="mcraft-btn border-red-700/60 text-red-400 bg-red-950/20 hover:bg-red-900/40 px-4 py-2 shrink-0 text-xs font-bold font-press-start"
+              >
+                Delete Server
+              </button>
+            </div>
+          </div>
+
+          {/* Danger Zone Confirmation Modal */}
+          {showDeleteConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none">
+              <div className="mcraft-panel w-full max-w-md bg-[#0b0c10] border-2 border-red-900 p-6 relative">
+                <div className="text-center space-y-4">
+                  <h2 className="font-press-start text-xs text-red-500 uppercase tracking-wider">
+                    Confirm Deletion
+                  </h2>
+                  <p className="text-xs text-zinc-400 font-mono leading-relaxed">
+                    Are you sure you want to remove this server?
+                  </p>
+                  <div className="p-3 bg-zinc-950 rounded border border-zinc-900 text-left font-mono text-[10px] text-gray-400 break-all select-all">
+                    <span className="text-zinc-500 block">Server Directory:</span>
+                    {installDir}
+                  </div>
+                  <p className="text-[10px] text-red-400 font-sans">
+                    Warning: This action cannot be undone. However, your local world files and server files on disk will remain untouched.
+                  </p>
+                  
+                  <div className="flex justify-end space-x-3 pt-4 border-t border-zinc-900">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="mcraft-btn px-4 py-2 border-zinc-800 text-gray-400 bg-transparent hover:bg-zinc-900"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDeleteConfirm(false);
+                        onDeleteServer(serverId);
+                      }}
+                      className="mcraft-btn px-4 py-2 border-red-900 text-red-400 bg-red-950/20 hover:bg-red-900"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
         {/* ADVANCED SETTINGS TAB */}
         {activeTab === 'advanced' && (

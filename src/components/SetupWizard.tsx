@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { FolderOpen, Download, AlertTriangle, Cpu, HelpCircle, ChevronRight, Sliders } from 'lucide-react';
 
 interface SetupWizardProps {
-  onSetupComplete: (dir: string, ram: number) => void;
+  onSetupComplete: (name: string, dir: string, ram: number) => void;
   systemRam: number;
   hasJava: boolean;
+  onCancel?: () => void;
+  isFirstServer?: boolean;
 }
 
 interface Version {
@@ -23,7 +25,7 @@ interface Installer {
   stable: boolean;
 }
 
-export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: SetupWizardProps) {
+export default function SetupWizard({ onSetupComplete, systemRam, hasJava, onCancel, isFirstServer = true }: SetupWizardProps) {
   const [serverType, setServerType] = useState<'vanilla' | 'fabric'>('vanilla');
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [versions, setVersions] = useState<Version[]>([]);
@@ -32,6 +34,7 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
   const [loadingVersions, setLoadingVersions] = useState(true);
 
   // Form selections
+  const [serverName, setServerName] = useState(isFirstServer ? 'Default Server' : '');
   const [selectedVersion, setSelectedVersion] = useState('');
   const [selectedLoader, setSelectedLoader] = useState('');
   const [selectedInstaller, setSelectedInstaller] = useState('');
@@ -78,10 +81,11 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
 
     // Query saved config if available
     window.api.getAppConfig().then(config => {
-      if (config.installDir) setInstallDir(config.installDir);
-      if (config.ramMB) {
+      const cfg = config as any;
+      if (cfg.installDir) setInstallDir(cfg.installDir);
+      if (cfg.ramMB) {
         // Cap saved RAM allocation to system RAM
-        const safeRam = Math.min(config.ramMB, systemRam - 512);
+        const safeRam = Math.min(cfg.ramMB, systemRam - 512);
         setRamAllocation(Math.max(512, safeRam));
       }
     });
@@ -106,11 +110,19 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
     const dir = await window.api.selectDirectory();
     if (dir) {
       setInstallDir(dir);
+      if (!serverName) {
+        const baseName = dir.split(/[\\/]/).pop() || '';
+        setServerName(baseName);
+      }
     }
   };
 
   const handleStartInstall = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!serverName.trim()) {
+      setInstallError('Please enter a server name.');
+      return;
+    }
     if (!installDir) {
       setInstallError('Please choose a valid installation directory.');
       return;
@@ -130,10 +142,8 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
       });
 
       if (result.success) {
-        // Save to config
-        await window.api.saveAppConfig({ installDir, ramMB: ramAllocation });
         // Complete wizard
-        onSetupComplete(installDir, ramAllocation);
+        onSetupComplete(serverName.trim(), installDir, ramAllocation);
       } else {
         setInstallError(result.error || 'Failed to download server JAR file.');
         setIsInstalling(false);
@@ -147,8 +157,8 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
   const filteredVersions = versions.filter(v => showSnapshots || v.type === 'release');
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-4 py-8 mc-pattern-bg">
-      <div className="w-full max-w-2xl mcraft-panel p-6 shadow-2xl relative overflow-hidden">
+    <div className="flex flex-col items-center justify-start h-full w-full overflow-y-auto px-4 py-8 mc-pattern-bg scrollbar">
+      <div className="w-full max-w-2xl mcraft-panel p-6 shadow-2xl relative my-auto shrink-0">
         {/* Title */}
         <div className="text-center mb-6 border-b border-gray-800 pb-4">
           <h1 className="font-press-start text-xl md:text-2xl text-green-500 tracking-wider uppercase mb-2">
@@ -305,6 +315,21 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
               )}
             </div>
 
+            {/* Server Name Input */}
+            <div className="space-y-2 font-mono">
+              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">
+                Server Name
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. My Survival Server"
+                value={serverName}
+                onChange={(e) => setServerName(e.target.value)}
+                className="w-full bg-zinc-900 border-2 border-zinc-700 rounded px-3 py-2 text-sm text-gray-200 outline-none focus:border-green-500 font-mono text-xs"
+                required
+              />
+            </div>
+
             {/* Directory Selection */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">
@@ -367,8 +392,17 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava }: Set
               </div>
             )}
 
-            {/* Submit Button */}
-            <div className="pt-4 border-t border-gray-800 flex justify-end">
+            {/* Submit & Cancel Buttons */}
+            <div className="pt-4 border-t border-gray-800 flex justify-end space-x-3">
+              {onCancel && (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="mcraft-btn px-6 py-3 text-xs tracking-wider border-zinc-800 text-gray-400 bg-transparent hover:bg-zinc-900"
+                >
+                  Cancel
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={loadingVersions}

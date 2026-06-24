@@ -6,13 +6,14 @@ const { spawn, execSync } = require('child_process');
 const os = require('os');
 const pidusage = require('pidusage');
 const nbt = require('prismarine-nbt');
+const net = require('net');
 
 let mainWindow = null;
-let serverProcess = null;
-let serverStatus = 'stopped';
-let activeInstallDir = null;
-let players = [];
-let statsInterval = null;
+const serverProcesses = {};
+const serverStatuses = {};
+const activeInstallDirs = {};
+const serverPlayers = {};
+const statsIntervals = {};
 
 // Helper to parse NBT buffer cleanly
 function parseNbtBuffer(buffer) {
@@ -28,14 +29,37 @@ function parseNbtBuffer(buffer) {
 const configPath = path.join(app.getPath('userData'), 'config.json');
 
 function getAppConfig() {
+  let config = { servers: [], activeServerId: '' };
   if (fs.existsSync(configPath)) {
     try {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     } catch (e) {
       console.error('Failed to read config', e);
     }
   }
-  return { installDir: '', ramMB: 2048 };
+
+  // Migrate old configuration schema
+  if (config.installDir && !config.servers) {
+    const defaultServer = {
+      id: 'default',
+      name: 'Default Server',
+      installDir: config.installDir,
+      ramMB: config.ramMB || 2048
+    };
+    config = {
+      servers: [defaultServer],
+      activeServerId: 'default'
+    };
+    saveAppConfig(config);
+  }
+
+  // Ensure structures exist
+  if (!config.servers) config.servers = [];
+  if (!config.activeServerId && config.servers.length > 0) {
+    config.activeServerId = config.servers[0].id;
+  }
+
+  return config;
 }
 
 function saveAppConfig(config) {
@@ -163,8 +187,14 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   // If the server process is still running, let's stop it
-  if (serverProcess) {
-    serverProcess.kill();
+  for (const proc of Object.values(serverProcesses)) {
+    if (proc) {
+      try {
+        proc.kill('SIGKILL');
+      } catch (e) {
+        console.error('Failed to kill server process on window close', e);
+      }
+    }
   }
   if (process.platform !== 'darwin') {
     app.quit();
@@ -293,18 +323,63 @@ ipcMain.handle('check-server-installed', async (event, installDir) => {
 // Get/Save App Settings Config
 ipcMain.handle('get-app-config', async () => getAppConfig());
 ipcMain.handle('save-app-config', async (event, config) => saveAppConfig(config));
+ipcMain.handle('get-server-statuses', async () => serverStatuses);
+ipcMain.handle('get-server-players', async () => serverPlayers);
+ipcMain.handle('resize-window', async (event, { width, height }) => {
+  if (mainWindow) {
+    mainWindow.setSize(width, height, true);
+  }
+});
+
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    });
+    server.once('listening', () => {
+      server.close();
+      resolve(false);
+    });
+    server.listen(port);
+  });
+}
 
 // Start server process
-ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
-  if (serverProcess) {
+ipcMain.handle('start-server', async (event, { serverId, installDir, ramMB }) => {
+  if (serverProcesses[serverId]) {
     return { success: false, error: 'Server is already running' };
   }
 
+  // Read port from server.properties to verify availability
+  let port = 25565;
+  const propsPath = path.join(installDir, 'server.properties');
+  if (fs.existsSync(propsPath)) {
+    try {
+      const content = fs.readFileSync(propsPath, 'utf-8');
+      const match = content.match(/^server-port\s*=\s*(\d+)/m);
+      if (match) {
+        port = parseInt(match[1], 10);
+      }
+    } catch (e) {
+      console.error('Failed to read port from properties', e);
+    }
+  }
+
+  const inUse = await isPortInUse(port);
+  if (inUse) {
+    return { success: false, error: `Port ${port} is already in use by another process. Please check if another Minecraft server or application is running.` };
+  }
+
   try {
-    activeInstallDir = installDir;
-    players = [];
-    serverStatus = 'starting';
-    if (mainWindow) mainWindow.webContents.send('server-status-change', serverStatus);
+    activeInstallDirs[serverId] = installDir;
+    serverPlayers[serverId] = [];
+    serverStatuses[serverId] = 'starting';
+    if (mainWindow) mainWindow.webContents.send('server-status-change', { serverId, status: 'starting' });
 
     const jarPath = path.join(installDir, 'server.jar');
     if (!fs.existsSync(jarPath)) {
@@ -312,7 +387,7 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
     }
 
     // Spawn server process
-    serverProcess = spawn('java', [
+    const proc = spawn('java', [
       `-Xmx${ramMB}M`,
       `-Xms512M`,
       '-jar',
@@ -321,56 +396,62 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
     ], {
       cwd: installDir
     });
+    serverProcesses[serverId] = proc;
 
     let buffer = '';
 
     const handleLogLine = (line) => {
       if (mainWindow) {
-        mainWindow.webContents.send('server-log', line);
+        mainWindow.webContents.send('server-log', { serverId, line });
       }
 
       // Check if server is running
       // Standard log line: [hh:mm:ss] [Server thread/INFO]: Done (12.345s)! For help, type "help"
       if (line.includes('Done (') && line.includes('s)! For help')) {
-        serverStatus = 'running';
-        if (mainWindow) mainWindow.webContents.send('server-status-change', serverStatus);
+        serverStatuses[serverId] = 'running';
+        if (mainWindow) mainWindow.webContents.send('server-status-change', { serverId, status: 'running' });
 
         // Start server stats monitoring interval
-        if (statsInterval) clearInterval(statsInterval);
-        statsInterval = setInterval(() => {
-          if (serverProcess) {
-            pidusage(serverProcess.pid, (err, stats) => {
+        if (statsIntervals[serverId]) clearInterval(statsIntervals[serverId]);
+        statsIntervals[serverId] = setInterval(() => {
+          const currentProc = serverProcesses[serverId];
+          if (currentProc) {
+            pidusage(currentProc.pid, (err, stats) => {
               if (!err && stats && mainWindow) {
                 mainWindow.webContents.send('server-stats', {
-                  cpu: Math.round(stats.cpu),
-                  memoryMB: Math.round(stats.memory / (1024 * 1024))
+                  serverId,
+                  stats: {
+                    cpu: Math.round(stats.cpu),
+                    memoryMB: Math.round(stats.memory / (1024 * 1024))
+                  }
                 });
               }
             });
           } else {
-            clearInterval(statsInterval);
-            statsInterval = null;
+            clearInterval(statsIntervals[serverId]);
+            delete statsIntervals[serverId];
           }
         }, 2000);
       }
 
       // Player join/leave check
-      // Joined: [18:40:02] [Server thread/INFO]: tristurtlerr joined the game
-      // Joined (Fabric/Vanilla newer): [18:40:02] [Server thread/INFO]: PlayerName joined the game
       const joinMatch = line.match(/\[Server thread\/INFO\]: (\w+) joined the game/);
       if (joinMatch) {
         const username = joinMatch[1];
-        if (!players.includes(username)) {
-          players.push(username);
-          if (mainWindow) mainWindow.webContents.send('server-players-change', players);
+        if (!serverPlayers[serverId]) serverPlayers[serverId] = [];
+        if (!serverPlayers[serverId].includes(username)) {
+          serverPlayers[serverId].push(username);
+          if (mainWindow) mainWindow.webContents.send('server-players-change', { serverId, players: serverPlayers[serverId] });
         }
       }
 
       const leaveMatch = line.match(/\[Server thread\/INFO\]: (\w+) left the game/);
       if (leaveMatch) {
         const username = leaveMatch[1];
-        players = players.filter(p => p !== username);
-        if (mainWindow) mainWindow.webContents.send('server-players-change', players);
+        if (serverPlayers[serverId]) {
+          serverPlayers[serverId] = serverPlayers[serverId].filter(p => p !== username);
+          if (mainWindow) mainWindow.webContents.send('server-players-change', { serverId, players: serverPlayers[serverId] });
+        }
       }
     };
 
@@ -384,77 +465,83 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
       }
     };
 
-    serverProcess.stdout.on('data', handleStreamData);
-    serverProcess.stderr.on('data', handleStreamData);
+    proc.stdout.on('data', handleStreamData);
+    proc.stderr.on('data', handleStreamData);
 
-    serverProcess.on('close', (code) => {
-      serverProcess = null;
-      serverStatus = 'stopped';
-      players = [];
+    proc.on('close', (code) => {
+      delete serverProcesses[serverId];
+      serverStatuses[serverId] = 'stopped';
+      serverPlayers[serverId] = [];
 
-      if (statsInterval) {
-        clearInterval(statsInterval);
-        statsInterval = null;
+      if (statsIntervals[serverId]) {
+        clearInterval(statsIntervals[serverId]);
+        delete statsIntervals[serverId];
       }
-      pidusage.clear();
-      if (mainWindow) {
-        mainWindow.webContents.send('server-stats', { cpu: 0, memoryMB: 0 });
+      
+      // Check if any other processes are running before clearing pidusage
+      if (Object.keys(serverProcesses).length === 0) {
+        pidusage.clear();
       }
 
       if (mainWindow) {
-        mainWindow.webContents.send('server-status-change', serverStatus);
-        mainWindow.webContents.send('server-players-change', players);
-        mainWindow.webContents.send('server-log', `[Dashboard]: Server process exited with code ${code}`);
+        mainWindow.webContents.send('server-stats', { serverId, stats: { cpu: 0, memoryMB: 0 } });
+        mainWindow.webContents.send('server-status-change', { serverId, status: 'stopped' });
+        mainWindow.webContents.send('server-players-change', { serverId, players: [] });
+        mainWindow.webContents.send('server-log', { serverId, line: `[Dashboard]: Server process exited with code ${code}` });
       }
     });
 
-    serverProcess.on('error', (err) => {
-      console.error('Failed to start server process:', err);
-      serverStatus = 'stopped';
-      players = [];
+    proc.on('error', (err) => {
+      console.error(`Failed to start server process for ${serverId}:`, err);
+      delete serverProcesses[serverId];
+      serverStatuses[serverId] = 'stopped';
+      serverPlayers[serverId] = [];
 
-      if (statsInterval) {
-        clearInterval(statsInterval);
-        statsInterval = null;
-      }
-      pidusage.clear();
-      if (mainWindow) {
-        mainWindow.webContents.send('server-stats', { cpu: 0, memoryMB: 0 });
+      if (statsIntervals[serverId]) {
+        clearInterval(statsIntervals[serverId]);
+        delete statsIntervals[serverId];
       }
 
+      if (Object.keys(serverProcesses).length === 0) {
+        pidusage.clear();
+      }
+
       if (mainWindow) {
-        mainWindow.webContents.send('server-status-change', serverStatus);
-        mainWindow.webContents.send('server-error', err.message);
-        mainWindow.webContents.send('server-log', `[Dashboard Error]: ${err.message}`);
+        mainWindow.webContents.send('server-stats', { serverId, stats: { cpu: 0, memoryMB: 0 } });
+        mainWindow.webContents.send('server-status-change', { serverId, status: 'stopped' });
+        mainWindow.webContents.send('server-error', { serverId, error: err.message });
+        mainWindow.webContents.send('server-log', { serverId, line: `[Dashboard Error]: ${err.message}` });
       }
     });
 
     return { success: true };
   } catch (e) {
-    serverStatus = 'stopped';
-    if (mainWindow) mainWindow.webContents.send('server-status-change', serverStatus);
+    serverStatuses[serverId] = 'stopped';
+    if (mainWindow) mainWindow.webContents.send('server-status-change', { serverId, status: 'stopped' });
     return { success: false, error: e.message };
   }
 });
 
 // Stop server process
-ipcMain.handle('stop-server', async () => {
-  if (!serverProcess) return { success: false, error: 'Server is not running' };
+ipcMain.handle('stop-server', async (event, serverId) => {
+  const proc = serverProcesses[serverId];
+  if (!proc) return { success: false, error: 'Server is not running' };
 
   try {
     // Send stop command to stdin
-    serverProcess.stdin.write('stop\n');
+    proc.stdin.write('stop\n');
     
     // Set safety timeout to kill if unresponsive
     const killTimeout = setTimeout(() => {
-      if (serverProcess) {
-        console.log('Force killing server process...');
-        serverProcess.kill('SIGKILL');
+      const p = serverProcesses[serverId];
+      if (p) {
+        console.log(`Force killing server process ${serverId}...`);
+        p.kill('SIGKILL');
       }
     }, 15000);
 
     // Clean up timeout if process exits
-    serverProcess.once('close', () => {
+    proc.once('close', () => {
       clearTimeout(killTimeout);
     });
 
@@ -465,14 +552,15 @@ ipcMain.handle('stop-server', async () => {
 });
 
 // Send console command
-ipcMain.handle('send-server-command', async (event, command) => {
-  if (!serverProcess) return { success: false, error: 'Server is not running' };
+ipcMain.handle('send-server-command', async (event, { serverId, command }) => {
+  const proc = serverProcesses[serverId];
+  if (!proc) return { success: false, error: 'Server is not running' };
 
   try {
-    serverProcess.stdin.write(`${command}\n`);
+    proc.stdin.write(`${command}\n`);
     // Echo command in local console log
     if (mainWindow) {
-      mainWindow.webContents.send('server-log', `> ${command}`);
+      mainWindow.webContents.send('server-log', { serverId, line: `> ${command}` });
     }
     return { success: true };
   } catch (e) {
@@ -683,7 +771,7 @@ function getLevelName(installDir) {
 }
 
 // Get all players (scans world/playerdata or world/players/data)
-ipcMain.handle('get-all-players', async (event, installDir) => {
+ipcMain.handle('get-all-players', async (event, { serverId, installDir }) => {
   try {
     const levelName = getLevelName(installDir);
     let playerdataDir = path.join(installDir, levelName, 'playerdata');
@@ -712,6 +800,7 @@ ipcMain.handle('get-all-players', async (event, installDir) => {
 
     const playersList = [];
     const addedUuids = new Set();
+    const activePlayers = serverPlayers[serverId] || [];
 
     // 1. Scan playerdata files on disk
     if (fs.existsSync(playerdataDir)) {
@@ -723,7 +812,7 @@ ipcMain.handle('get-all-players', async (event, installDir) => {
           playersList.push({
             uuid,
             name,
-            online: players.includes(name)
+            online: activePlayers.includes(name)
           });
           addedUuids.add(uuid);
         }
@@ -731,7 +820,7 @@ ipcMain.handle('get-all-players', async (event, installDir) => {
     }
 
     // 2. Merge online players who haven't saved to disk yet
-    for (const onlineName of players) {
+    for (const onlineName of activePlayers) {
       const resolvedUuid = uuidMapByName[onlineName.toLowerCase()];
       if (resolvedUuid && !addedUuids.has(resolvedUuid)) {
         playersList.push({
@@ -993,4 +1082,27 @@ ipcMain.handle('get-player-profile', async (event, { installDir, uuid, username 
     console.error('Failed to compile player profile', e);
     return null;
   }
+});
+
+// Clean up processes on exit or signal
+const cleanUpProcesses = () => {
+  for (const proc of Object.values(serverProcesses)) {
+    if (proc) {
+      try {
+        proc.kill('SIGKILL');
+      } catch (e) {
+        console.error('Failed to kill server process on exit', e);
+      }
+    }
+  }
+};
+
+process.on('exit', cleanUpProcesses);
+process.on('SIGINT', () => {
+  cleanUpProcesses();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  cleanUpProcesses();
+  process.exit(0);
 });

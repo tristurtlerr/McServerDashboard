@@ -218,7 +218,7 @@ export default function PlayerProfile({ installDir, uuid, username, onBack, isOn
 
 
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-6 flex flex-col h-[calc(100vh-100px)]">
+    <div className="w-full max-w-5xl mx-auto space-y-6 flex flex-col flex-1 min-h-0">
       
       {/* Profile Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-800 pb-4 shrink-0">

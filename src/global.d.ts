@@ -15,11 +15,20 @@ interface Window {
       installDir: string;
     }) => Promise<{ success: boolean; jarPath?: string; error?: string }>;
     checkServerInstalled: (dir: string) => Promise<{ installed: boolean; eulaAccepted: boolean }>;
-    getAppConfig: () => Promise<{ installDir: string; ramMB: number }>;
-    saveAppConfig: (config: { installDir: string; ramMB: number }) => Promise<boolean>;
-    startServer: (params: { installDir: string; ramMB: number }) => Promise<{ success: boolean; error?: string }>;
-    stopServer: () => Promise<{ success: boolean; error?: string }>;
-    sendServerCommand: (cmd: string) => Promise<{ success: boolean; error?: string }>;
+    getAppConfig: () => Promise<{
+      servers: Array<{ id: string; name: string; installDir: string; ramMB: number }>;
+      activeServerId: string;
+    }>;
+    saveAppConfig: (config: {
+      servers: Array<{ id: string; name: string; installDir: string; ramMB: number }>;
+      activeServerId: string;
+    }) => Promise<boolean>;
+    getServerStatuses: () => Promise<Record<string, 'stopped' | 'starting' | 'running'>>;
+    getServerPlayers: () => Promise<Record<string, string[]>>;
+    resizeWindow: (width: number, height: number) => Promise<void>;
+    startServer: (params: { serverId: string; installDir: string; ramMB: number }) => Promise<{ success: boolean; error?: string }>;
+    stopServer: (serverId: string) => Promise<{ success: boolean; error?: string }>;
+    sendServerCommand: (serverId: string, cmd: string) => Promise<{ success: boolean; error?: string }>;
     checkEulaStatus: (dir: string) => Promise<boolean>;
     acceptEula: (dir: string) => Promise<boolean>;
     readProperties: (dir: string) => Promise<Record<string, string>>;
@@ -27,7 +36,7 @@ interface Window {
     readWhitelist: (dir: string) => Promise<string[]>;
     addToWhitelist: (dir: string, name: string) => Promise<{ success: boolean; error?: string }>;
     removeFromWhitelist: (dir: string, name: string) => Promise<{ success: boolean; error?: string }>;
-    getAllPlayers: (dir: string) => Promise<Array<{ uuid: string; name: string; online: boolean }>>;
+    getAllPlayers: (serverId: string, dir: string) => Promise<Array<{ uuid: string; name: string; online: boolean }>>;
     getPlayerProfile: (dir: string, uuid: string, name: string) => Promise<{
       nbt: {
         pos: [number, number, number];
@@ -58,10 +67,10 @@ interface Window {
     } | null>;
 
     onDownloadProgress: (callback: (data: { percent: number; downloadedBytes: number; totalBytes: number }) => void) => () => void;
-    onServerLog: (callback: (line: string) => void) => () => void;
-    onServerStatusChange: (callback: (status: 'stopped' | 'starting' | 'running') => void) => () => void;
-    onServerPlayersChange: (callback: (players: string[]) => void) => () => void;
-    onServerError: (callback: (err: string) => void) => () => void;
-    onServerStats: (callback: (stats: { cpu: number; memoryMB: number }) => void) => () => void;
+    onServerLog: (callback: (data: { serverId: string; line: string }) => void) => () => void;
+    onServerStatusChange: (callback: (data: { serverId: string; status: 'stopped' | 'starting' | 'running' }) => void) => () => void;
+    onServerPlayersChange: (callback: (data: { serverId: string; players: string[] }) => void) => () => void;
+    onServerError: (callback: (data: { serverId: string; error: string }) => void) => () => void;
+    onServerStats: (callback: (data: { serverId: string; stats: { cpu: number; memoryMB: number } }) => void) => () => void;
   }
 }
