@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Press+Start+2P&family=Fira+Code:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Outfit', system-ui, sans-serif;
+  --font-press-start: 'Press Start 2P', monospace;
+  --font-mono: 'Fira Code', monospace;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111111;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 2px;
+  border: 1px solid #3c3c3c;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3e3e3e;
+}
+
+body {
+  background-color: #0b0c10;
+  color: #f1f5f9;
+  font-family: 'Outfit', system-ui, sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+}
+
+/* Minecraft dirt/stone pattern overlay background (subtle dark pattern) */
+.mc-pattern-bg {
+  background-color: #0c0d12;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 0),
+                    radial-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 0);
+  background-size: 32px 32px;
+  background-position: 0 0, 16px 16px;
+}
+
+/* Custom styles for terminal console */
+.console-container {
+  font-family: 'Fira Code', monospace;
+  background-color: #07080a;
+}
+
+/* Glow effects and premium accents */
+.mcraft-panel {
+  border: 3px solid #1a1a1a;
+  border-top-color: #4a4a4a;
+  border-left-color: #4a4a4a;
+  border-right-color: #2b2b2b;
+  border-bottom-color: #2b2b2b;
+  background-color: #181920;
+}
+
+.mcraft-btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px;
+  border: 2px solid #000;
+  box-shadow: inset -2px -2px 0px 0px #1e1e1e, inset 2px 2px 0px 0px #707070;
+  background-color: #4a4a4a;
+  color: #e0e0e0;
+  image-rendering: pixelated;
+  transition: all 0.05s ease;
+  user-select: none;
+  cursor: pointer;
+}
+
+.mcraft-btn:hover:not(:disabled) {
+  background-color: #5c5c5c;
+  color: #ffffff;
+  box-shadow: inset -2px -2px 0px 0px #111111, inset 2px 2px 0px 0px #8c8c8c;
+}
+
+.mcraft-btn:active:not(:disabled) {
+  box-shadow: inset 2px 2px 0px 0px #111111, inset -2px -2px 0px 0px #4a4a4a;
+  background-color: #313131;
+  color: #aaaaaa;
+}
+
+.mcraft-btn:disabled {
+  background-color: #262626;
+  border-color: #111111;
+  color: #666666;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.mcraft-btn-green {
+  background-color: #3c8527;
+  color: #e0f2fe;
+  box-shadow: inset -2px -2px 0px 0px #1a4b12, inset 2px 2px 0px 0px #5ca545;
+}
+
+.mcraft-btn-green:hover:not(:disabled) {
+  background-color: #479a2f;
+  box-shadow: inset -2px -2px 0px 0px #12370c, inset 2px 2px 0px 0px #6eb956;
+}
+
+.mcraft-btn-green:active:not(:disabled) {
+  box-shadow: inset 2px 2px 0px 0px #12370c, inset -2px -2px 0px 0px #479a2f;
+  background-color: #2b6a1b;
+}
+
+.mcraft-btn-red {
+  background-color: #a02828;
+  color: #fee2e2;
+  box-shadow: inset -2px -2px 0px 0px #5c1414, inset 2px 2px 0px 0px #c54242;
+}
+
+.mcraft-btn-red:hover:not(:disabled) {
+  background-color: #b93333;
+  box-shadow: inset -2px -2px 0px 0px #460c0c, inset 2px 2px 0px 0px #dc5b5b;
+}
+
+.mcraft-btn-red:active:not(:disabled) {
+  box-shadow: inset 2px 2px 0px 0px #460c0c, inset -2px -2px 0px 0px #b93333;
+  background-color: #7b1d1d;
+}
+
+/* Glassmorphism custom components */
+.glass-panel {
+  background: rgba(24, 25, 32, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
