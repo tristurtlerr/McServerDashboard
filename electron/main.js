@@ -4,12 +4,14 @@ const fs = require('fs');
 const https = require('https');
 const { spawn, execSync } = require('child_process');
 const os = require('os');
+const pidusage = require('pidusage');
 
 let mainWindow = null;
 let serverProcess = null;
 let serverStatus = 'stopped';
 let activeInstallDir = null;
 let players = [];
+let statsInterval = null;
 
 // App configuration helper
 const configPath = path.join(app.getPath('userData'), 'config.json');
@@ -321,6 +323,24 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
       if (line.includes('Done (') && line.includes('s)! For help')) {
         serverStatus = 'running';
         if (mainWindow) mainWindow.webContents.send('server-status-change', serverStatus);
+
+        // Start server stats monitoring interval
+        if (statsInterval) clearInterval(statsInterval);
+        statsInterval = setInterval(() => {
+          if (serverProcess) {
+            pidusage(serverProcess.pid, (err, stats) => {
+              if (!err && stats && mainWindow) {
+                mainWindow.webContents.send('server-stats', {
+                  cpu: Math.round(stats.cpu),
+                  memoryMB: Math.round(stats.memory / (1024 * 1024))
+                });
+              }
+            });
+          } else {
+            clearInterval(statsInterval);
+            statsInterval = null;
+          }
+        }, 2000);
       }
 
       // Player join/leave check
@@ -360,6 +380,16 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
       serverProcess = null;
       serverStatus = 'stopped';
       players = [];
+
+      if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+      }
+      pidusage.clear();
+      if (mainWindow) {
+        mainWindow.webContents.send('server-stats', { cpu: 0, memoryMB: 0 });
+      }
+
       if (mainWindow) {
         mainWindow.webContents.send('server-status-change', serverStatus);
         mainWindow.webContents.send('server-players-change', players);
@@ -371,6 +401,16 @@ ipcMain.handle('start-server', async (event, { installDir, ramMB }) => {
       console.error('Failed to start server process:', err);
       serverStatus = 'stopped';
       players = [];
+
+      if (statsInterval) {
+        clearInterval(statsInterval);
+        statsInterval = null;
+      }
+      pidusage.clear();
+      if (mainWindow) {
+        mainWindow.webContents.send('server-stats', { cpu: 0, memoryMB: 0 });
+      }
+
       if (mainWindow) {
         mainWindow.webContents.send('server-status-change', serverStatus);
         mainWindow.webContents.send('server-error', err.message);
@@ -526,6 +566,94 @@ ipcMain.handle('write-properties', async (event, { installDir, properties }) => 
     return { success: true };
   } catch (e) {
     console.error('Failed to write server.properties', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Whitelist IO and UUID resolution
+ipcMain.handle('read-whitelist', async (event, installDir) => {
+  const whitelistPath = path.join(installDir, 'whitelist.json');
+  if (!fs.existsSync(whitelistPath)) return [];
+  try {
+    const content = fs.readFileSync(whitelistPath, 'utf-8');
+    const parsed = JSON.parse(content);
+    return parsed.map(p => p.name);
+  } catch (e) {
+    console.error('Failed to read whitelist', e);
+    return [];
+  }
+});
+
+ipcMain.handle('add-to-whitelist', async (event, { installDir, username }) => {
+  const whitelistPath = path.join(installDir, 'whitelist.json');
+  let whitelist = [];
+  if (fs.existsSync(whitelistPath)) {
+    try {
+      whitelist = JSON.parse(fs.readFileSync(whitelistPath, 'utf-8'));
+    } catch (e) {
+      console.error('Failed to read existing whitelist', e);
+    }
+  }
+
+  // Check if already in whitelist
+  if (whitelist.some(p => p.name.toLowerCase() === username.toLowerCase())) {
+    return { success: true };
+  }
+
+  let uuid = '';
+  try {
+    const result = await httpGetJson(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+    if (result && result.id) {
+      const id = result.id;
+      uuid = `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+    }
+  } catch (e) {
+    console.warn(`Could not resolve Mojang UUID for ${username}, using offline fallback`, e);
+  }
+
+  if (!uuid) {
+    const crypto = require('crypto');
+    const hash = crypto.createHash('md5').update(`OfflinePlayer:${username}`).digest();
+    hash[6] = (hash[6] & 0x0f) | 0x30;
+    hash[8] = (hash[8] & 0x3f) | 0x80;
+    const hex = hash.toString('hex');
+    uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  whitelist.push({ uuid, name: username });
+
+  try {
+    if (!fs.existsSync(installDir)) {
+      fs.mkdirSync(installDir, { recursive: true });
+    }
+    fs.writeFileSync(whitelistPath, JSON.stringify(whitelist, null, 2), 'utf-8');
+    
+    // Reload whitelist in-game
+    if (serverProcess) {
+      serverProcess.stdin.write('whitelist reload\n');
+    }
+    return { success: true };
+  } catch (e) {
+    console.error('Failed to save whitelist', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('remove-from-whitelist', async (event, { installDir, username }) => {
+  const whitelistPath = path.join(installDir, 'whitelist.json');
+  if (!fs.existsSync(whitelistPath)) return { success: true };
+  try {
+    let whitelist = JSON.parse(fs.readFileSync(whitelistPath, 'utf-8'));
+    whitelist = whitelist.filter(p => p.name.toLowerCase() !== username.toLowerCase());
+    fs.writeFileSync(whitelistPath, JSON.stringify(whitelist, null, 2), 'utf-8');
+    
+    // Reload whitelist in-game
+    if (serverProcess) {
+      serverProcess.stdin.write('whitelist reload\n');
+    }
+    return { success: true };
+  } catch (e) {
+    console.error('Failed to write whitelist', e);
     return { success: false, error: e.message };
   }
 });

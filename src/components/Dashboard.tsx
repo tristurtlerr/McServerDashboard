@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Square, RotateCcw, Settings, Terminal, Users, Info, ChevronRight, HardDrive, RefreshCw } from 'lucide-react';
+import { Play, Square, RotateCcw, Settings, Terminal, Users, ChevronRight, HardDrive, RefreshCw, UserX, Ban, Cpu, Activity } from 'lucide-react';
 import EulaModal from './EulaModal';
 
 interface DashboardProps {
@@ -22,6 +22,8 @@ export default function Dashboard({
   const [logs, setLogs] = useState<string[]>([]);
   const [command, setCommand] = useState('');
   const [showEulaModal, setShowEulaModal] = useState(false);
+  const [stats, setStats] = useState({ cpu: 0, memoryMB: 0 });
+  const [confirmAction, setConfirmAction] = useState<{ type: 'kick' | 'ban', playerName: string } | null>(null);
   
   // Command History
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -31,7 +33,7 @@ export default function Dashboard({
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  // Set up listeners for logs and status
+  // Set up listeners for logs, status, and stats
   useEffect(() => {
     // Clear logs on mount
     setLogs([`[Dashboard]: Connected. Server directory: ${installDir}`]);
@@ -44,9 +46,14 @@ export default function Dashboard({
       setLogs((prev) => [...prev, `[Dashboard Error]: ${err}`]);
     });
 
+    const unsubscribeStats = window.api.onServerStats((s) => {
+      setStats(s);
+    });
+
     return () => {
       unsubscribeLog();
       unsubscribeError();
+      unsubscribeStats();
     };
   }, [installDir]);
 
@@ -81,6 +88,16 @@ export default function Dashboard({
     if (!result.success) {
       setLogs((prev) => [...prev, `[Dashboard Error]: Failed to start server: ${result.error}`]);
     }
+  };
+
+  const handleConfirmPlayerAction = async () => {
+    if (!confirmAction) return;
+    const { type, playerName } = confirmAction;
+    
+    // Execute kick/ban command in-game
+    await window.api.sendServerCommand(`${type} ${playerName}`);
+    setLogs((prev) => [...prev, `[Dashboard]: Executing Command: /${type} ${playerName}`]);
+    setConfirmAction(null);
   };
 
   const handleAcceptEula = async () => {
@@ -358,46 +375,87 @@ export default function Dashboard({
                 {players.map((player) => (
                   <div 
                     key={player} 
-                    className="flex items-center space-x-3 p-2 bg-zinc-950/60 rounded border border-zinc-900 hover:bg-zinc-950 transition-colors"
+                    className="flex items-center justify-between p-2 bg-zinc-950/60 rounded border border-zinc-900 hover:bg-zinc-950 transition-colors group"
                   >
-                    <img 
-                      src={`https://mc-heads.net/avatar/${player}/32`}
-                      alt={player}
-                      onError={(e) => {
-                        // Fallback avatar if head API fails
-                        e.currentTarget.src = 'https://minotar.net/avatar/char/32';
-                      }}
-                      className="h-8 w-8 rounded shrink-0 border border-zinc-800 bg-zinc-900"
-                    />
-                    <span className="text-xs font-mono text-gray-200 font-semibold truncate">{player}</span>
+                    <div className="flex items-center space-x-3 truncate">
+                      <img 
+                        src={`https://mc-heads.net/avatar/${player}/32`}
+                        alt={player}
+                        onError={(e) => {
+                          e.currentTarget.src = 'https://minotar.net/avatar/char/32';
+                        }}
+                        className="h-8 w-8 rounded shrink-0 border border-zinc-800 bg-zinc-900"
+                      />
+                      <span className="text-xs font-mono text-gray-200 font-semibold truncate">{player}</span>
+                    </div>
+                    
+                    {/* Action buttons (kick / ban) */}
+                    <div className="flex items-center space-x-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setConfirmAction({ type: 'kick', playerName: player })}
+                        disabled={serverStatus !== 'running'}
+                        className="p-1 text-orange-400 hover:text-orange-300 hover:bg-zinc-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                        title={`Kick ${player}`}
+                      >
+                        <UserX className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setConfirmAction({ type: 'ban', playerName: player })}
+                        disabled={serverStatus !== 'running'}
+                        className="p-1 text-red-500 hover:text-red-400 hover:bg-zinc-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                        title={`Ban ${player}`}
+                      >
+                        <Ban className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Server Info Details */}
+          {/* Server Performance Details */}
           <div className="mcraft-panel p-4 space-y-4 flex-1">
             <h3 className="text-xs font-press-start font-bold text-blue-400 border-b border-gray-800 pb-2 flex items-center uppercase">
-              <Info className="h-4 w-4 mr-2" />
-              Server Specs
+              <Activity className="h-4 w-4 mr-2" />
+              Performance
             </h3>
 
-            <div className="space-y-3 text-xs font-mono">
-              <div className="flex justify-between border-b border-zinc-900 pb-1.5">
-                <span className="text-gray-500">Allocated RAM:</span>
-                <span className="text-gray-300 font-semibold">{(allocatedRam / 1024).toFixed(1)} GB</span>
+            <div className="space-y-4 font-mono text-xs">
+              {/* CPU Usage */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-gray-400">
+                  <span className="flex items-center">
+                    <Cpu className="h-3.5 w-3.5 mr-1.5 text-zinc-500" />
+                    CPU Usage:
+                  </span>
+                  <span className="font-semibold text-green-400">{serverStatus === 'running' ? `${stats.cpu}%` : '0%'}</span>
+                </div>
+                <div className="w-full bg-black border border-zinc-850 h-3 p-0.5 rounded-sm">
+                  <div 
+                    className="bg-green-600 h-full transition-all duration-500 rounded-sm"
+                    style={{ width: `${serverStatus === 'running' ? Math.min(stats.cpu, 100) : 0}%` }}
+                  ></div>
+                </div>
               </div>
-              
-              <div className="flex justify-between border-b border-zinc-900 pb-1.5">
-                <span className="text-gray-500">Engine Type:</span>
-                <span className="text-gray-300 capitalize">{installDir.toLowerCase().includes('fabric') ? 'Fabric' : 'Vanilla'}</span>
-              </div>
-              
-              <div className="space-y-1">
-                <span className="text-gray-500 block">Path:</span>
-                <div className="p-2 bg-zinc-950/60 rounded border border-zinc-900 text-[10px] text-gray-400 break-all leading-relaxed select-all">
-                  {installDir}
+
+              {/* RAM Usage */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-gray-400">
+                  <span className="flex items-center">
+                    <HardDrive className="h-3.5 w-3.5 mr-1.5 text-zinc-500" />
+                    RAM Usage:
+                  </span>
+                  <span className="font-semibold text-green-400">
+                    {serverStatus === 'running' ? `${stats.memoryMB} MB` : '0 MB'}
+                    <span className="text-[10px] text-gray-500 font-normal font-sans"> / {allocatedRam} MB</span>
+                  </span>
+                </div>
+                <div className="w-full bg-black border border-zinc-850 h-3 p-0.5 rounded-sm">
+                  <div 
+                    className="bg-green-600 h-full transition-all duration-500 rounded-sm"
+                    style={{ width: `${serverStatus === 'running' ? Math.min((stats.memoryMB / allocatedRam) * 100, 100) : 0}%` }}
+                  ></div>
                 </div>
               </div>
 
@@ -405,7 +463,7 @@ export default function Dashboard({
                 <div className="bg-zinc-900/60 rounded p-2.5 border border-zinc-800/80 flex items-start space-x-2 text-[10px] leading-relaxed text-gray-400">
                   <HardDrive className="h-3.5 w-3.5 text-yellow-600 shrink-0 mt-0.5" />
                   <span>
-                    To connect, open Minecraft and add a server with address <code className="bg-black px-1.5 py-0.5 rounded text-yellow-500">localhost</code>.
+                    To connect, join <code className="bg-black px-1.5 py-0.5 rounded text-yellow-500">localhost</code> in the Minecraft client.
                   </span>
                 </div>
               </div>
@@ -420,6 +478,35 @@ export default function Dashboard({
         onAccept={handleAcceptEula} 
         onDecline={handleDeclineEula} 
       />
+
+      {/* Kick/Ban Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="w-full max-w-sm mcraft-panel p-6 shadow-2xl relative">
+            <h3 className="font-press-start text-[11px] text-red-500 uppercase tracking-wider mb-4 flex items-center">
+              <Ban className="h-4 w-4 mr-2" />
+              Confirm {confirmAction.type}
+            </h3>
+            <p className="text-sm text-gray-300 mb-6">
+              Are you sure you want to <strong className="text-white uppercase">{confirmAction.type}</strong> player <strong className="text-yellow-500 font-mono">{confirmAction.playerName}</strong>?
+            </p>
+            <div className="flex space-x-3 justify-end pt-4 border-t border-gray-800">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="mcraft-btn px-4 py-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmPlayerAction}
+                className="mcraft-btn mcraft-btn-red px-4 py-2"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

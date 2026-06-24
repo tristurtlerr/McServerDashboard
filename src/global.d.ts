@@ -24,11 +24,15 @@ interface Window {
     acceptEula: (dir: string) => Promise<boolean>;
     readProperties: (dir: string) => Promise<Record<string, string>>;
     writeProperties: (dir: string, props: Record<string, string>) => Promise<{ success: boolean; error?: string }>;
+    readWhitelist: (dir: string) => Promise<string[]>;
+    addToWhitelist: (dir: string, name: string) => Promise<{ success: boolean; error?: string }>;
+    removeFromWhitelist: (dir: string, name: string) => Promise<{ success: boolean; error?: string }>;
 
     onDownloadProgress: (callback: (data: { percent: number; downloadedBytes: number; totalBytes: number }) => void) => () => void;
     onServerLog: (callback: (line: string) => void) => () => void;
     onServerStatusChange: (callback: (status: 'stopped' | 'starting' | 'running') => void) => () => void;
     onServerPlayersChange: (callback: (players: string[]) => void) => () => void;
     onServerError: (callback: (err: string) => void) => () => void;
+    onServerStats: (callback: (stats: { cpu: number; memoryMB: number }) => void) => () => void;
   }
 }

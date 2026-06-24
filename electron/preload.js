@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('api', {
   acceptEula: (dir) => ipcRenderer.invoke('accept-eula', dir),
   readProperties: (dir) => ipcRenderer.invoke('read-properties', dir),
   writeProperties: (dir, props) => ipcRenderer.invoke('write-properties', { installDir: dir, properties: props }),
+  readWhitelist: (dir) => ipcRenderer.invoke('read-whitelist', dir),
+  addToWhitelist: (dir, name) => ipcRenderer.invoke('add-to-whitelist', { installDir: dir, username: name }),
+  removeFromWhitelist: (dir, name) => ipcRenderer.invoke('remove-from-whitelist', { installDir: dir, username: name }),
 
   // Event Listeners (with cleanups returned as functions)
   onDownloadProgress: (callback) => {
@@ -42,5 +45,10 @@ contextBridge.exposeInMainWorld('api', {
     const subscription = (event, err) => callback(err);
     ipcRenderer.on('server-error', subscription);
     return () => ipcRenderer.removeListener('server-error', subscription);
+  },
+  onServerStats: (callback) => {
+    const subscription = (event, stats) => callback(stats);
+    ipcRenderer.on('server-stats', subscription);
+    return () => ipcRenderer.removeListener('server-stats', subscription);
   }
 });
