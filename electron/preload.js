@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('api', {
   removeFromWhitelist: (dir, name) => ipcRenderer.invoke('remove-from-whitelist', { installDir: dir, username: name }),
   getAllPlayers: (serverId, dir) => ipcRenderer.invoke('get-all-players', { serverId, installDir: dir }),
   getPlayerProfile: (dir, uuid, name) => ipcRenderer.invoke('get-player-profile', { installDir: dir, uuid, username: name }),
+  detectServerType: (dir) => ipcRenderer.invoke('detect-server-type', dir),
+  searchMods: (params) => ipcRenderer.invoke('search-mods', params),
+  getModDownload: (params) => ipcRenderer.invoke('get-mod-download', params),
+  installMod: (params) => ipcRenderer.invoke('install-mod', params),
+  getInstalledMods: (dir) => ipcRenderer.invoke('get-installed-mods', dir),
+  removeMod: (params) => ipcRenderer.invoke('remove-mod', params),
 
   // Event Listeners (with cleanups returned as functions)
   onDownloadProgress: (callback) => {
@@ -55,5 +61,10 @@ contextBridge.exposeInMainWorld('api', {
     const subscription = (event, stats) => callback(stats);
     ipcRenderer.on('server-stats', subscription);
     return () => ipcRenderer.removeListener('server-stats', subscription);
+  },
+  onModInstallProgress: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('mod-install-progress', subscription);
+    return () => ipcRenderer.removeListener('mod-install-progress', subscription);
   }
 });

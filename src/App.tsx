@@ -4,17 +4,20 @@ import Dashboard from './components/Dashboard';
 import SettingsPage from './components/SettingsPage';
 import PlayerDirectory from './components/PlayerDirectory';
 import PlayerProfile from './components/PlayerProfile';
+import ModManager from './components/ModManager';
 import Sidebar from './components/Sidebar';
 import AddServerModal from './components/AddServerModal';
 import { HardDrive, RefreshCw } from 'lucide-react';
 
-type ViewState = 'loading' | 'wizard' | 'dashboard' | 'settings' | 'directory' | 'profile';
+type ViewState = 'loading' | 'wizard' | 'dashboard' | 'settings' | 'directory' | 'profile' | 'mods';
 
 interface ServerEntry {
   id: string;
   name: string;
   installDir: string;
   ramMB: number;
+  type?: 'vanilla' | 'fabric';
+  mcVersion?: string;
 }
 
 export default function App() {
@@ -104,12 +107,14 @@ export default function App() {
     }
   }, [view]);
 
-  const handleSetupComplete = async (name: string, dir: string, ram: number) => {
+  const handleSetupComplete = async (name: string, dir: string, ram: number, type: 'vanilla' | 'fabric', mcVersion: string) => {
     const newServer = {
       id: Date.now().toString(),
       name,
       installDir: dir,
-      ramMB: ram
+      ramMB: ram,
+      type,
+      mcVersion
     };
     const updatedServers = [...servers, newServer];
     setServers(updatedServers);
@@ -268,9 +273,11 @@ export default function App() {
               allocatedRam={allocatedRam}
               serverStatus={serverStatus}
               players={players}
+              serverType={activeServer.type}
               onOpenSettings={() => setView('settings')}
               onOpenWizard={() => setView('wizard')}
               onOpenDirectory={() => setView('directory')}
+              onOpenMods={() => setView('mods')}
             />
           )}
 
@@ -295,6 +302,15 @@ export default function App() {
                 setView('profile');
               }}
               onClose={() => setView('dashboard')}
+            />
+          )}
+
+          {view === 'mods' && activeServer && (
+            <ModManager
+              installDir={installDir}
+              serverType={activeServer.type || 'vanilla'}
+              mcVersion={activeServer.mcVersion}
+              onBack={() => setView('dashboard')}
             />
           )}
 

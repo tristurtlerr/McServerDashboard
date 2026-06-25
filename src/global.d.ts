@@ -16,11 +16,11 @@ interface Window {
     }) => Promise<{ success: boolean; jarPath?: string; error?: string }>;
     checkServerInstalled: (dir: string) => Promise<{ installed: boolean; eulaAccepted: boolean }>;
     getAppConfig: () => Promise<{
-      servers: Array<{ id: string; name: string; installDir: string; ramMB: number }>;
+      servers: Array<{ id: string; name: string; installDir: string; ramMB: number; type?: 'vanilla' | 'fabric'; mcVersion?: string }>;
       activeServerId: string;
     }>;
     saveAppConfig: (config: {
-      servers: Array<{ id: string; name: string; installDir: string; ramMB: number }>;
+      servers: Array<{ id: string; name: string; installDir: string; ramMB: number; type?: 'vanilla' | 'fabric'; mcVersion?: string }>;
       activeServerId: string;
     }) => Promise<boolean>;
     getServerStatuses: () => Promise<Record<string, 'stopped' | 'starting' | 'running'>>;
@@ -72,5 +72,34 @@ interface Window {
     onServerPlayersChange: (callback: (data: { serverId: string; players: string[] }) => void) => () => void;
     onServerError: (callback: (data: { serverId: string; error: string }) => void) => () => void;
     onServerStats: (callback: (data: { serverId: string; stats: { cpu: number; memoryMB: number } }) => void) => () => void;
+    detectServerType: (dir: string) => Promise<{ type: 'vanilla' | 'fabric'; mcVersion: string | null }>;
+    searchMods: (params: { query: string; mcVersion: string; offset?: number }) => Promise<{
+      success: boolean;
+      hits: Array<{
+        project_id: string;
+        slug: string;
+        title: string;
+        description: string;
+        icon_url: string;
+        downloads: number;
+        follows: number;
+        categories: string[];
+        versions: string[];
+      }>;
+      total: number;
+      error?: string;
+    }>;
+    getModDownload: (params: { projectId: string; mcVersion: string }) => Promise<{
+      success: boolean;
+      url?: string;
+      filename?: string;
+      size?: number;
+      versionName?: string;
+      error?: string;
+    }>;
+    installMod: (params: { installDir: string; url: string; filename: string }) => Promise<{ success: boolean; error?: string }>;
+    getInstalledMods: (dir: string) => Promise<Array<{ filename: string; sizeMB: number }>>;
+    removeMod: (params: { installDir: string; filename: string }) => Promise<{ success: boolean; error?: string }>;
+    onModInstallProgress: (callback: (data: { filename: string; percent: number }) => void) => () => void;
   }
 }

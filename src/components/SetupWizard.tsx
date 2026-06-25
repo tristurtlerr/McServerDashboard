@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FolderOpen, Download, AlertTriangle, Cpu, HelpCircle, ChevronRight, Sliders } from 'lucide-react';
 
 interface SetupWizardProps {
-  onSetupComplete: (name: string, dir: string, ram: number) => void;
+  onSetupComplete: (name: string, dir: string, ram: number, type: 'vanilla' | 'fabric', mcVersion: string) => void;
   systemRam: number;
   hasJava: boolean;
   onCancel?: () => void;
@@ -142,8 +142,7 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava, onCan
       });
 
       if (result.success) {
-        // Complete wizard
-        onSetupComplete(serverName.trim(), installDir, ramAllocation);
+        onSetupComplete(serverName.trim(), installDir, ramAllocation, serverType, selectedVersion);
       } else {
         setInstallError(result.error || 'Failed to download server JAR file.');
         setIsInstalling(false);

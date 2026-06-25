@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Square, RotateCcw, Settings, Terminal, Users, ChevronRight, HardDrive, RefreshCw, UserX, Ban, Cpu, Activity } from 'lucide-react';
+import { Play, Square, RotateCcw, Settings, Terminal, Users, ChevronRight, HardDrive, RefreshCw, UserX, Ban, Cpu, Activity, Package } from 'lucide-react';
 import EulaModal from './EulaModal';
 
 interface DashboardProps {
@@ -8,9 +8,11 @@ interface DashboardProps {
   allocatedRam: number;
   serverStatus: 'stopped' | 'starting' | 'running';
   players: string[];
+  serverType?: 'vanilla' | 'fabric';
   onOpenSettings: () => void;
   onOpenWizard: () => void;
   onOpenDirectory: () => void;
+  onOpenMods: () => void;
 }
 
 export default function Dashboard({
@@ -19,9 +21,11 @@ export default function Dashboard({
   allocatedRam,
   serverStatus,
   players,
+  serverType,
   onOpenSettings,
   onOpenWizard,
-  onOpenDirectory
+  onOpenDirectory,
+  onOpenMods
 }: DashboardProps) {
   const [logs, setLogs] = useState<string[]>([]);
   const [command, setCommand] = useState('');
@@ -291,6 +295,16 @@ export default function Dashboard({
             <RefreshCw className="h-4 w-4 mr-2" />
             Reinstall
           </button>
+
+          {serverType === 'fabric' && (
+            <button
+              onClick={onOpenMods}
+              className="mcraft-btn px-4 py-2 flex items-center text-purple-400 border-purple-800 hover:border-purple-600"
+            >
+              <Package className="h-4 w-4 mr-2" />
+              Mods
+            </button>
+          )}
         </div>
       </div>
 

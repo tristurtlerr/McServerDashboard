@@ -1084,6 +1084,127 @@ ipcMain.handle('get-player-profile', async (event, { installDir, uuid, username 
   }
 });
 
+// Detect if a server directory is Fabric and try to find its MC version
+ipcMain.handle('detect-server-type', async (event, installDir) => {
+  if (!installDir || !fs.existsSync(installDir)) return { type: 'vanilla', mcVersion: null };
+
+  const isFabric = fs.existsSync(path.join(installDir, 'fabric-server-launch.properties'));
+
+  // Try to read MC version from version.json (written by Fabric launcher)
+  let mcVersion = null;
+  const versionJsonPath = path.join(installDir, 'version.json');
+  if (fs.existsSync(versionJsonPath)) {
+    try {
+      const vj = JSON.parse(fs.readFileSync(versionJsonPath, 'utf-8'));
+      mcVersion = vj.id || vj.name || null;
+    } catch (e) {}
+  }
+
+  // Fallback: check .fabric/server/fabric-server-launch.json
+  if (!mcVersion) {
+    const fabricLaunchPath = path.join(installDir, '.fabric', 'server', 'fabric-server-launch.json');
+    if (fs.existsSync(fabricLaunchPath)) {
+      try {
+        const fl = JSON.parse(fs.readFileSync(fabricLaunchPath, 'utf-8'));
+        mcVersion = fl.gameVersion || null;
+      } catch (e) {}
+    }
+  }
+
+  return { type: isFabric ? 'fabric' : 'vanilla', mcVersion };
+});
+
+// Search Modrinth for mods compatible with a specific MC version and Fabric loader
+ipcMain.handle('search-mods', async (event, { query, mcVersion, offset = 0 }) => {
+  try {
+    const facets = JSON.stringify([
+      ['project_type:mod'],
+      ['categories:fabric'],
+      [`versions:${mcVersion}`]
+    ]);
+    const encodedFacets = encodeURIComponent(facets);
+    const encodedQuery = encodeURIComponent(query || '');
+    const url = `https://api.modrinth.com/v2/search?query=${encodedQuery}&facets=${encodedFacets}&limit=20&offset=${offset}`;
+    const data = await httpGetJson(url);
+    return { success: true, hits: data.hits || [], total: data.total_hits || 0 };
+  } catch (e) {
+    return { success: false, error: e.message, hits: [], total: 0 };
+  }
+});
+
+// Get latest compatible version file for a Modrinth project
+ipcMain.handle('get-mod-download', async (event, { projectId, mcVersion }) => {
+  try {
+    const loaders = encodeURIComponent(JSON.stringify(['fabric']));
+    const versions = encodeURIComponent(JSON.stringify([mcVersion]));
+    const url = `https://api.modrinth.com/v2/project/${projectId}/version?loaders=${loaders}&game_versions=${versions}`;
+    const versionList = await httpGetJson(url);
+    if (!versionList || versionList.length === 0) {
+      return { success: false, error: 'No compatible version found for this Minecraft version.' };
+    }
+    const latest = versionList[0];
+    const primaryFile = latest.files.find(f => f.primary) || latest.files[0];
+    if (!primaryFile) {
+      return { success: false, error: 'No download file found.' };
+    }
+    return {
+      success: true,
+      url: primaryFile.url,
+      filename: primaryFile.filename,
+      size: primaryFile.size,
+      versionName: latest.name
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Download and install a mod to the server's mods/ folder
+ipcMain.handle('install-mod', async (event, { installDir, url, filename }) => {
+  try {
+    const modsDir = path.join(installDir, 'mods');
+    if (!fs.existsSync(modsDir)) {
+      fs.mkdirSync(modsDir, { recursive: true });
+    }
+    const dest = path.join(modsDir, filename);
+    await downloadFile(url, dest, (percent) => {
+      if (mainWindow) mainWindow.webContents.send('mod-install-progress', { filename, percent });
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// List installed mods in the mods/ folder
+ipcMain.handle('get-installed-mods', async (event, installDir) => {
+  const modsDir = path.join(installDir, 'mods');
+  if (!fs.existsSync(modsDir)) return [];
+  try {
+    return fs.readdirSync(modsDir)
+      .filter(f => f.endsWith('.jar'))
+      .map(f => {
+        const stat = fs.statSync(path.join(modsDir, f));
+        return { filename: f, sizeMB: Math.round(stat.size / (1024 * 1024) * 10) / 10 };
+      });
+  } catch (e) {
+    return [];
+  }
+});
+
+// Remove a mod from the mods/ folder
+ipcMain.handle('remove-mod', async (event, { installDir, filename }) => {
+  try {
+    const modPath = path.join(installDir, 'mods', filename);
+    if (fs.existsSync(modPath)) {
+      fs.unlinkSync(modPath);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Clean up processes on exit or signal
 const cleanUpProcesses = () => {
   for (const proc of Object.values(serverProcesses)) {
