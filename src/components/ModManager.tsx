@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Search, Download, Trash2, Package, RefreshCw, AlertTriangle, CheckCircle, Loader } from 'lucide-react';
+import { ArrowLeft, Search, Download, Trash2, Package, AlertTriangle, CheckCircle, Loader } from 'lucide-react';
 
 interface ModManagerProps {
   installDir: string;
@@ -26,6 +26,7 @@ interface InstalledMod {
 type Tab = 'browse' | 'installed';
 
 export default function ModManager({ installDir, serverType, mcVersion: propMcVersion, onBack }: ModManagerProps) {
+  const serverTypeLabel = serverType.charAt(0).toUpperCase() + serverType.slice(1);
   const [tab, setTab] = useState<Tab>('browse');
   const [mcVersion, setMcVersion] = useState(propMcVersion || '');
   const [query, setQuery] = useState('');
@@ -155,7 +156,7 @@ export default function ModManager({ installDir, serverType, mcVersion: propMcVe
           <h2 className="font-press-start text-sm text-purple-400 uppercase tracking-wider">Mod Manager</h2>
           {mcVersion && (
             <span className="text-xs font-mono text-gray-500 border border-gray-700 px-2 py-0.5 rounded">
-              MC {mcVersion} · Fabric
+              MC {mcVersion} · {serverTypeLabel}
             </span>
           )}
         </div>
@@ -254,7 +255,7 @@ export default function ModManager({ installDir, serverType, mcVersion: propMcVe
 
           {total > 0 && (
             <div className="text-xs text-gray-500 font-mono mb-2 shrink-0">
-              {total} Mods gefunden für MC {mcVersion} (Fabric)
+              {total} Mods gefunden für MC {mcVersion} ({serverTypeLabel})
             </div>
           )}
 
@@ -338,7 +339,7 @@ export default function ModManager({ installDir, serverType, mcVersion: propMcVe
             {!searchLoading && results.length === 0 && mcVersion && !searchError && (
               <div className="text-center text-gray-500 text-sm font-mono py-12">
                 <Search className="h-8 w-8 mx-auto mb-3 text-zinc-700" />
-                Suche nach Mods für MC {mcVersion} (Fabric)
+                Suche nach Mods für MC {mcVersion} ({serverTypeLabel})
               </div>
             )}
           </div>
