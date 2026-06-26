@@ -1120,7 +1120,8 @@ ipcMain.handle('search-mods', async (event, { query, mcVersion, offset = 0 }) =>
     const facets = JSON.stringify([
       ['project_type:mod'],
       ['categories:fabric'],
-      [`versions:${mcVersion}`]
+      [`versions:${mcVersion}`],
+      ['server_side!=unsupported']
     ]);
     const encodedFacets = encodeURIComponent(facets);
     const encodedQuery = encodeURIComponent(query || '');
@@ -1135,6 +1136,13 @@ ipcMain.handle('search-mods', async (event, { query, mcVersion, offset = 0 }) =>
 // Get latest compatible version file for a Modrinth project
 ipcMain.handle('get-mod-download', async (event, { projectId, mcVersion }) => {
   try {
+    // Check if the project is client-only first
+    const projectUrl = `https://api.modrinth.com/v2/project/${projectId}`;
+    const project = await httpGetJson(projectUrl);
+    if (project && project.server_side === 'unsupported') {
+      return { success: false, error: 'Dieser Mod ist clientseitig (client-only) und kann nicht auf dem Server installiert werden.' };
+    }
+
     const loaders = encodeURIComponent(JSON.stringify(['fabric']));
     const versions = encodeURIComponent(JSON.stringify([mcVersion]));
     const url = `https://api.modrinth.com/v2/project/${projectId}/version?loaders=${loaders}&game_versions=${versions}`;
@@ -1158,6 +1166,7 @@ ipcMain.handle('get-mod-download', async (event, { projectId, mcVersion }) => {
     return { success: false, error: e.message };
   }
 });
+
 
 // Download and install a mod to the server's mods/ folder
 ipcMain.handle('install-mod', async (event, { installDir, url, filename }) => {

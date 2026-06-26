@@ -128,6 +128,21 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava, onCan
       return;
     }
 
+    const sanitizedName = serverName.trim().replace(/[\\/:*?"<>|]/g, '').trim();
+    if (!sanitizedName) {
+      setInstallError('Please enter a valid server name.');
+      return;
+    }
+
+    const normalizedInstallDir = installDir.replace(/[\\/]+$/, '');
+    const endsWithServerDir = normalizedInstallDir.split(/[\\/]/).pop()?.toLowerCase() === sanitizedName.toLowerCase();
+
+    let finalInstallDir = installDir;
+    if (!endsWithServerDir) {
+      const separator = installDir.includes('\\') ? '\\' : '/';
+      finalInstallDir = normalizedInstallDir + separator + sanitizedName;
+    }
+
     setInstallError('');
     setIsInstalling(true);
     setDownloadProgress({ percent: 0, downloaded: 0, total: 0 });
@@ -138,11 +153,11 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava, onCan
         version: selectedVersion,
         loaderVersion: serverType === 'fabric' ? selectedLoader : undefined,
         installerVersion: serverType === 'fabric' ? selectedInstaller : undefined,
-        installDir
+        installDir: finalInstallDir
       });
 
       if (result.success) {
-        onSetupComplete(serverName.trim(), installDir, ramAllocation, serverType, selectedVersion);
+        onSetupComplete(serverName.trim(), finalInstallDir, ramAllocation, serverType, selectedVersion);
       } else {
         setInstallError(result.error || 'Failed to download server JAR file.');
         setIsInstalling(false);
@@ -352,6 +367,20 @@ export default function SetupWizard({ onSetupComplete, systemRam, hasJava, onCan
                   Browse
                 </button>
               </div>
+              
+              {/* Final Path Preview */}
+              {installDir && serverName.trim() && (
+                <div className="text-[10px] text-zinc-500 font-mono bg-zinc-900/30 border border-zinc-800/60 p-2.5 rounded mt-1.5 flex flex-col space-y-1">
+                  <span className="text-zinc-500 uppercase tracking-wider text-[9px] font-bold">Target Location:</span>
+                  <span className="text-zinc-300 break-all">{(() => {
+                    const sanitized = serverName.trim().replace(/[\\/:*?"<>|]/g, '').trim();
+                    const normalized = installDir.replace(/[\\/]+$/, '');
+                    const endsWithDir = normalized.split(/[\\/]/).pop()?.toLowerCase() === sanitized.toLowerCase();
+                    const separator = installDir.includes('\\') ? '\\' : '/';
+                    return endsWithDir ? normalized : (normalized + separator + sanitized);
+                  })()}</span>
+                </div>
+              )}
             </div>
 
             {/* RAM Allocation Slider */}
